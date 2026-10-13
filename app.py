@@ -1,34 +1,71 @@
-from flask import Flask, jsonify, request
+import json
+import os
+from typing import Literal, Optional
+from uuid import uuid4
+from fastapi import FastAPI, HTTPException
+import random
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel
+from mangum import Mangum
 
-app = Flask(__name__)
 
-tareas = [
-    {"id": 1, "titulo": "Crear instancia EC2", "hecha": True},
-    {"id": 2, "titulo": "Conectar por SSH", "hecha": False},
-]
+class Book(BaseModel):
+    name: str
+    genre: Literal["fiction", "non-fiction"]
+    price: float
+    book_id: Optional[str] = uuid4().hex
 
-@app.route("/")
-def inicio():
-    return jsonify({"mensaje": "API funcionando en EC2"})
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"})
+BOOKS_FILE = "books.json"
+BOOKS = []
 
-@app.route("/tareas", methods=["GET"])
-def listar():
-    return jsonify(tareas)
+if os.path.exists(BOOKS_FILE):
+    with open(BOOKS_FILE, "r") as f:
+        BOOKS = json.load(f)
 
-@app.route("/tareas", methods=["POST"])
-def crear():
-    datos = request.get_json()
-    nueva = {
-        "id": len(tareas) + 1,
-        "titulo": datos.get("titulo", "sin título"),
-        "hecha": False,
-    }
-    tareas.append(nueva)
-    return jsonify(nueva), 201
+app = FastAPI()
+handler = Mangum(app)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to my bookstore app!"}
+
+
+@app.get("/random-book")
+async def random_book():
+    return random.choice(BOOKS)
+
+
+@app.get("/list-books")
+async def list_books():
+    return {"books": BOOKS}
+
+
+@app.get("/book_by_index/{index}")
+async def book_by_index(index: int):
+    if index < len(BOOKS):
+        return BOOKS[index]
+    else:
+        raise HTTPException(404, f"Book index {index} out of range ({len(BOOKS)}).")
+
+
+@app.post("/add-book")
+async def add_book(book: Book):
+    book.book_id = uuid4().hex
+    json_book = jsonable_encoder(book)
+    BOOKS.append(json_book)
+
+    with open(BOOKS_FILE, "w") as f:
+        json.dump(BOOKS, f)
+
+    return {"book_id": book.book_id}
+
+
+@app.get("/get-book")
+async def get_book(book_id: str):
+    for book in BOOKS:
+        if book.book_id == book_id:
+            return book
+
+    raise HTTPException(404, f"Book ID {book_id} not found in database.")
